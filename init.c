@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -169,11 +170,11 @@ static int drive_gpio(int __unused n, int __unused level,
 }
 #endif
 
-static int gpio_sequence(struct port_interface *port, const char *seq, size_t len_seq)
+static int gpio_sequence(struct port_interface *port, const char *seq, size_t len_seq, bool release)
 {
-	struct gpio_list *gpio_to_release = NULL;
+	static struct gpio_list *gpio_to_release = NULL;
 #if defined(__linux__)
-	struct gpio_list *to_free;
+	static struct gpio_list *to_free;
 #endif
 	int ret = 0, level, gpio;
 	int sleep_time = 0;
@@ -264,12 +265,15 @@ static int gpio_sequence(struct port_interface *port, const char *seq, size_t le
 			usleep(sleep_time);
 		}
 	}
+
+	if (release) {
 #if defined(__linux__)
-	while (gpio_to_release) {
-		release_gpio(gpio_to_release->gpio, gpio_to_release->input, gpio_to_release->exported);
-		to_free = gpio_to_release;
-		gpio_to_release = gpio_to_release->next;
-		free(to_free);
+		while (gpio_to_release) {
+			release_gpio(gpio_to_release->gpio, gpio_to_release->input, gpio_to_release->exported);
+			to_free = gpio_to_release;
+			gpio_to_release = gpio_to_release->next;
+			free(to_free);
+		}
 	}
 #endif
 	fprintf(diag, "GPIO sequence end\n\n");
@@ -285,9 +289,9 @@ static int gpio_bl_entry(struct port_interface *port, const char *seq)
 
 	s = strchr(seq, ':');
 	if (s == NULL)
-		return gpio_sequence(port, seq, strlen(seq));
+		return gpio_sequence(port, seq, strlen(seq), true);
 
-	return gpio_sequence(port, seq, s - seq);
+	return gpio_sequence(port, seq, s - seq, false);
 }
 
 int gpio_bl_exit(struct port_interface *port, const char *seq)
@@ -301,7 +305,7 @@ int gpio_bl_exit(struct port_interface *port, const char *seq)
 	if (s == NULL || s[1] == '\0')
 		return 1;
 
-	return gpio_sequence(port, s + 1, strlen(s + 1));
+	return gpio_sequence(port, s + 1, strlen(s + 1), true);
 }
 
 int init_bl_entry(struct port_interface *port, const char *seq)
